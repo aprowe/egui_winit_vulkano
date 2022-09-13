@@ -6,7 +6,7 @@
 // at your option. All files in the project carrying such
 // notice may not be copied, modified, or distributed except
 // according to those terms.
-use std::sync::Arc;
+use std::{sync::Arc, collections::HashMap};
 
 use egui::{ClippedPrimitive, TexturesDelta};
 use egui_winit::winit::event_loop::EventLoopWindowTarget;
@@ -17,7 +17,7 @@ use vulkano::{
     image::ImageViewAbstract,
     render_pass::Subpass,
     swapchain::Surface,
-    sync::GpuFuture,
+    sync::GpuFuture, shader::EntryPoint,
 };
 use winit::window::Window;
 
@@ -262,4 +262,9 @@ impl Gui {
     pub fn context(&self) -> egui::Context {
         self.egui_ctx.clone()
     }
+
+    pub fn register_shader<'a>(&'a mut self, name: String, entry: EntryPoint<'a>) {
+        self.renderer.register_shader(name, entry);
+    }
+
 }

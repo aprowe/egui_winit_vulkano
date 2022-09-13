@@ -7,13 +7,13 @@
 // notice may not be copied, modified, or distributed except
 // according to those terms.
 
-use std::{convert::TryFrom, sync::Arc};
+use std::{any::Any, collections::HashMap, convert::TryFrom, sync::Arc};
 
 use ahash::AHashMap;
 use bytemuck::{Pod, Zeroable};
 use egui::{
-    epaint::{Mesh, Primitive},
-    ClippedPrimitive, Rect, TexturesDelta,
+    epaint::{Mesh, Primitive, Vertex},
+    ClippedPrimitive, Color32, PaintCallbackInfo, Pos2, Rect, TextureId, TexturesDelta,
 };
 use vulkano::{
     buffer::{
@@ -44,6 +44,7 @@ use vulkano::{
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
     sampler::{Filter, Sampler, SamplerAddressMode, SamplerCreateInfo, SamplerMipmapMode},
+    shader::EntryPoint,
     sync::GpuFuture,
     DeviceSize,
 };
@@ -62,7 +63,19 @@ pub struct EguiVertex {
 }
 vulkano::impl_vertex!(EguiVertex, position, tex_coords, color);
 
+pub struct CallbackFn {
+    f: Box<dyn Fn(&mut Painter) + Sync + Send>,
+}
+
+impl CallbackFn {
+    pub fn new<F: Fn(&mut Painter) + Sync + Send + 'static>(callback: F) -> Self {
+        let f = Box::new(callback);
+        CallbackFn { f }
+    }
+}
+
 pub struct Renderer {
+    pipelines: HashMap<String, Arc<GraphicsPipeline>>,
     gfx_queue: Arc<Queue>,
     render_pass: Option<Arc<RenderPass>>,
     is_overlay: bool,
@@ -80,6 +93,29 @@ pub struct Renderer {
     texture_desc_sets: AHashMap<egui::TextureId, Arc<PersistentDescriptorSet>>,
     texture_images: AHashMap<egui::TextureId, Arc<dyn ImageViewAbstract + Send + Sync + 'static>>,
     next_native_tex_id: u64,
+}
+
+pub struct Painter<'a> {
+    pub builder: &'a mut AutoCommandBufferBuilder<SecondaryAutoCommandBuffer>,
+    pub shader: String,
+    pub renderer: &'a Renderer,
+
+    pub resolution: [f32; 2],
+}
+
+impl<'a> Painter<'a> {
+    pub fn set_shader(&mut self, s: &str) {
+        self.shader = s.to_string();
+    }
+
+    pub fn resolution(&self) -> [f32; 2] {
+        self.resolution
+    }
+
+    pub fn push_constants<Pc: 'static>(&mut self, pc: Pc) {
+        let pipeline = self.renderer.pipelines.get(&self.shader).unwrap().clone();
+        self.builder.push_constants(pipeline.layout().clone(), 0, pc);
+    }
 }
 
 impl Renderer {
@@ -102,6 +138,7 @@ impl Renderer {
         .unwrap();
         Renderer {
             gfx_queue,
+            pipelines: HashMap::new(),
             format: final_output_format,
             render_pass: None,
             vertex_buffer_pool,
@@ -175,6 +212,7 @@ impl Renderer {
         .unwrap();
         Renderer {
             gfx_queue,
+            pipelines: HashMap::new(),
             format: final_output_format,
             render_pass: Some(render_pass),
             vertex_buffer_pool,
@@ -221,6 +259,30 @@ impl Renderer {
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState::new())
             .fragment_shader(fs.entry_point("main").unwrap(), ())
+            .viewport_state(ViewportState::viewport_dynamic_scissor_dynamic(1))
+            .color_blend_state(blend_state)
+            .rasterization_state(RasterizationState::new().cull_mode(CullModeEnum::None))
+            .render_pass(subpass)
+            .build(gfx_queue.device().clone())
+            .unwrap()
+    }
+
+    fn create_custom_pipeline<'a>(
+        gfx_queue: Arc<Queue>,
+        subpass: Subpass,
+        frag_code: EntryPoint<'a>,
+    ) -> Arc<GraphicsPipeline> {
+        let vs = vs2::load(gfx_queue.device().clone()).expect("failed to create shader module");
+
+        let mut blend = AttachmentBlend::alpha();
+        blend.color_source = BlendFactor::One;
+        let blend_state = ColorBlendState::new(1).blend(blend);
+
+        GraphicsPipeline::start()
+            .vertex_input_state(BuffersDefinition::new().vertex::<EguiVertex>())
+            .vertex_shader(vs.entry_point("main").unwrap(), ())
+            .input_assembly_state(InputAssemblyState::new())
+            .fragment_shader(frag_code, ())
             .viewport_state(ViewportState::viewport_dynamic_scissor_dynamic(1))
             .color_blend_state(blend_state)
             .rasterization_state(RasterizationState::new().cull_mode(CullModeEnum::None))
@@ -607,6 +669,93 @@ impl Renderer {
                         .draw_indexed(indices.len() as u32, 1, 0, 0, 0)
                         .unwrap();
                 }
+                Primitive::Callback(callback) => {
+                    if !callback.rect.is_positive() {
+                        continue;
+                    }
+
+                    let mut painter = Painter {
+                        builder,
+                        shader: "".into(),
+                        renderer: &self,
+                        resolution: [callback.rect.width(), callback.rect.height()],
+                    };
+
+                    if let Some(callback) = callback.callback.downcast_ref::<CallbackFn>() {
+                        (callback.f)(&mut painter);
+                    } else {
+                        panic!(
+                            "Error: Unsupported render callback. Expected \
+                             egui_winit_vulkano::CallbackFn"
+                        );
+                    }
+                    let pipeline = self.pipelines.get(&painter.shader).unwrap().clone();
+
+                    let mesh = Mesh {
+                        indices: vec![0, 1, 2, 3, 1, 2],
+                        vertices: vec![
+                            Vertex {
+                                pos: Pos2 { x: 0., y: 0. },
+                                uv: Pos2 { x: 0., y: 0. },
+                                color: Color32::WHITE,
+                            },
+                            Vertex {
+                                pos: Pos2 { x: callback.rect.width(), y: 0. },
+                                uv: Pos2 { x: 1., y: 0. },
+                                color: Color32::WHITE,
+                            },
+                            Vertex {
+                                pos: Pos2 { x: 0., y: callback.rect.height() },
+                                uv: Pos2 { x: 0., y: 1. },
+                                color: Color32::WHITE,
+                            },
+                            Vertex {
+                                pos: Pos2 { x: callback.rect.width(), y: callback.rect.height() },
+                                uv: Pos2 { x: 1., y: 1. },
+                                color: Color32::WHITE,
+                            },
+                        ],
+                        texture_id: TextureId::Managed(0),
+                    };
+
+                    let scissors = vec![self.get_rect_scissor(
+                        scale_factor,
+                        framebuffer_dimensions,
+                        *clip_rect,
+                    )];
+
+                    dbg!(clip_rect);
+
+                    let (vertices, indices) = self.create_subbuffers(&mesh);
+
+                    let push_constants = vs::ty::PushConstants {
+                        screen_size: [100.0, 100.0],
+                        need_srgb_conv: self.need_srgb_conv.into(),
+                    };
+
+                    builder
+                        .bind_pipeline_graphics(pipeline.clone())
+                        .set_viewport(0, vec![Viewport {
+                            origin: [
+                                clip_rect.left() + callback.rect.left(),
+                                clip_rect.top() + callback.rect.top(),
+                            ],
+                            dimensions: [
+                                callback.rect.width() as f32,
+                                callback.rect.height() as f32,
+                            ],
+                            depth_range: 0.0..1.0,
+                        }])
+                        .set_scissor(0, vec![Scissor {
+                            origin: [clip_rect.left() as u32, clip_rect.top() as u32],
+                            dimensions: [clip_rect.width() as u32, clip_rect.height() as u32],
+                        }])
+                        // .push_constants(pipeline.layout().clone(), 0, push_constants)
+                        .bind_vertex_buffers(0, vertices.clone())
+                        .bind_index_buffer(indices.clone())
+                        .draw_indexed(indices.len() as u32, 1, 0, 0, 0)
+                        .unwrap();
+                }
                 _ => continue,
             }
         }
@@ -614,6 +763,11 @@ impl Renderer {
 
     pub fn queue(&self) -> Arc<Queue> {
         self.gfx_queue.clone()
+    }
+
+    pub fn register_shader<'a>(&'a mut self, name: String, entry: EntryPoint<'a>) {
+        self.pipelines
+            .insert(name, Self::create_custom_pipeline(self.queue(), self.subpass.clone(), entry));
     }
 }
 
@@ -654,6 +808,27 @@ void main() {
   // We must convert vertex color to linear
   v_color = linear_from_srgba(color);
   v_tex_coords = tex_coords;
+}"
+    }
+}
+
+mod vs2 {
+    vulkano_shaders::shader! {
+        ty: "vertex",
+        src: "
+#version 450
+
+layout(location = 0) in vec2 position;
+layout(location = 1) in vec2 tex_coords;
+layout(location = 2) in vec4 color;
+
+layout(location = 0) out vec2 v_pos;
+layout(location = 1) out vec2 v_uv;
+
+void main() {
+    gl_Position = vec4(2 * tex_coords - vec2(1), 0.0, 1.0);
+    v_uv = tex_coords;
+    v_pos = position;
 }"
     }
 }
