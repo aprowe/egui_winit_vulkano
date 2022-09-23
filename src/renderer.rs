@@ -15,6 +15,7 @@ use egui::{
     epaint::{Mesh, Primitive, Vertex},
     ClippedPrimitive, Color32, PaintCallbackInfo, Pos2, Rect, TextureId, TexturesDelta,
 };
+use image::{ImageBuffer, Rgba};
 use vulkano::{
     buffer::{
         cpu_pool::CpuBufferPoolChunk, BufferUsage, CpuAccessibleBuffer, CpuBufferPool,
@@ -22,14 +23,18 @@ use vulkano::{
     },
     command_buffer::{
         AutoCommandBufferBuilder, BlitImageInfo, CommandBufferInheritanceInfo, CommandBufferUsage,
-        CopyBufferToImageInfo, ImageBlit, PrimaryAutoCommandBuffer, PrimaryCommandBuffer,
-        RenderPassBeginInfo, SecondaryAutoCommandBuffer, SubpassContents,
+        CopyBufferToImageInfo, CopyImageToBufferInfo, ImageBlit, PrimaryAutoCommandBuffer,
+        PrimaryCommandBuffer, RenderPassBeginInfo, SecondaryAutoCommandBuffer, SubpassContents,
     },
-    descriptor_set::{layout::DescriptorSetLayout, PersistentDescriptorSet, WriteDescriptorSet},
+    descriptor_set::{
+        layout::DescriptorSetLayout, DescriptorSetsCollection, PersistentDescriptorSet,
+        WriteDescriptorSet,
+    },
     device::{Device, Queue},
     format::{Format, NumericType},
     image::{
-        view::ImageView, ImageAccess, ImageLayout, ImageUsage, ImageViewAbstract, ImmutableImage,
+        view::ImageView, ImageAccess, ImageAspects, ImageCreateFlags, ImageDimensions, ImageLayout,
+        ImageSubresourceRange, ImageUsage, ImageViewAbstract, ImmutableImage, StorageImage,
     },
     memory::pool::StandardMemoryPool,
     pipeline::{
@@ -40,7 +45,8 @@ use vulkano::{
             vertex_input::BuffersDefinition,
             viewport::{Scissor, Viewport, ViewportState},
         },
-        GraphicsPipeline, Pipeline, PipelineBindPoint,
+        layout::PipelineLayoutCreateInfo,
+        GraphicsPipeline, Pipeline, PipelineBindPoint, PipelineLayout,
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
     sampler::{Filter, Sampler, SamplerAddressMode, SamplerCreateInfo, SamplerMipmapMode},
@@ -84,6 +90,8 @@ pub struct Renderer {
     #[allow(unused)]
     format: vulkano::format::Format,
     sampler: Arc<Sampler>,
+
+    pub view: Option<Arc<ImageView<StorageImage>>>,
 
     vertex_buffer_pool: CpuBufferPool<EguiVertex>,
     index_buffer_pool: CpuBufferPool<u32>,
@@ -151,6 +159,7 @@ impl Renderer {
             is_overlay: false,
             need_srgb_conv,
             sampler,
+            view: None,
         }
     }
 
@@ -170,10 +179,16 @@ impl Renderer {
                         store: Store,
                         format: final_output_format,
                         samples: 1,
+                    },
+                    gui_color: {
+                        load: Load,
+                        store: Store,
+                        format: final_output_format,
+                        samples: 1,
                     }
                 },
                 pass: {
-                        color: [final_color],
+                        color: [final_color, gui_color],
                         depth_stencil: {}
                 }
             )
@@ -186,10 +201,16 @@ impl Renderer {
                         store: Store,
                         format: final_output_format,
                         samples: 1,
+                    },
+                    gui_color: {
+                        load: Load,
+                        store: Store,
+                        format: final_output_format,
+                        samples: 1,
                     }
                 },
                 pass: {
-                        color: [final_color],
+                        color: [final_color, gui_color],
                         depth_stencil: {}
                 }
             )
@@ -225,6 +246,7 @@ impl Renderer {
             is_overlay,
             need_srgb_conv,
             sampler,
+            view: None,
         }
     }
 
@@ -511,6 +533,44 @@ impl Renderer {
     ) -> (AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, [u32; 2]) {
         // Get dimensions
         let img_dims = final_image.image().dimensions().width_height();
+
+        use vulkano::image::ImageDimensions;
+
+        // let image = vulkano::image::StorageImage::new(
+        //     self.gfx_queue.device().clone(),
+        //     final_image.image().dimensions(),
+        //     Format::R8G8B8A8_SRGB,
+        //     Some(self.gfx_queue.family()),
+        // )
+        // .unwrap();
+
+        let image = vulkano::image::StorageImage::with_usage(
+            self.gfx_queue.device().clone(),
+            final_image.image().dimensions(),
+            Format::B8G8R8A8_SRGB,
+            ImageUsage { 
+                transfer_src: true,
+                // transfer_dst: true,
+                .. ImageUsage::color_attachment()
+            },
+            ImageCreateFlags::none(),
+            Some(self.gfx_queue.family()),
+        )
+        .unwrap();
+
+        let view = ImageView::new(image.clone(), vulkano::image::view::ImageViewCreateInfo {
+            format: Some(Format::B8G8R8A8_SRGB),
+            subresource_range: ImageSubresourceRange {
+                aspects: ImageAspects { color: true, ..ImageAspects::none() },
+                array_layers: 0..1,
+                mip_levels: 0..1,
+            },
+            ..Default::default()
+        })
+        .unwrap();
+
+        self.view = Some(view.clone());
+
         // Create framebuffer (must be in same order as render pass description in `new`
         let framebuffer = Framebuffer::new(
             self.render_pass
@@ -520,7 +580,7 @@ impl Renderer {
                      instead",
                 )
                 .clone(),
-            FramebufferCreateInfo { attachments: vec![final_image], ..Default::default() },
+            FramebufferCreateInfo { attachments: vec![final_image, view], ..Default::default() },
         )
         .unwrap();
         let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
@@ -533,7 +593,10 @@ impl Renderer {
         command_buffer_builder
             .begin_render_pass(
                 RenderPassBeginInfo {
-                    clear_values: vec![if !self.is_overlay { Some([0.0; 4].into()) } else { None }],
+                    clear_values: vec![
+                        if !self.is_overlay { Some([0.0; 4].into()) } else { None },
+                        Some([0.0; 4].into()),
+                    ],
                     ..RenderPassBeginInfo::framebuffer(framebuffer)
                 },
                 SubpassContents::SecondaryCommandBuffers,
@@ -564,6 +627,7 @@ impl Renderer {
         // Execute draw commands
         let command_buffer = builder.build().unwrap();
         command_buffer_builder.execute_commands(command_buffer).unwrap();
+
         let done_future = self.finish(command_buffer_builder, Box::new(before_future));
 
         for &id in &textures_delta.free {
@@ -581,12 +645,37 @@ impl Renderer {
     ) -> Box<dyn GpuFuture> {
         // We end render pass
         command_buffer_builder.end_render_pass().unwrap();
+
+        // let buf = CpuAccessibleBuffer::from_iter(
+        //     self.gfx_queue.device().clone(),
+        //     BufferUsage::all(),
+        //     false,
+        //     // (0..callback.rect.area() as u32 * 4).map(|_| 0u8),
+        //     (0..(1024 * 3600 * 4)).map(|_| 0u8),
+        // )
+        // .unwrap();
+        
+        // command_buffer_builder.copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
+        //     self.view.clone().unwrap().image().clone(),
+        //     buf.clone()
+        // ))
+        // .unwrap();
+
+        // let im = image::ImageBuffer::<Rgba<u8>, _>::from_raw(1024, 3600, &bc[..]).unwrap();
+        // im.save("image.png").unwrap();
+
         // Then execute our whole command buffer
         let command_buffer = command_buffer_builder.build().unwrap();
         let after_main_cb =
             before_main_cb_future.then_execute(self.gfx_queue.clone(), command_buffer).unwrap();
         let future =
             after_main_cb.then_signal_fence_and_flush().expect("Failed to signal fence and flush");
+        // future.wait(None).unwrap();
+        // let bc = buf.read().unwrap();
+        // dbg!(bc[0]);
+        // dbg!(bc[1]);
+        // dbg!(bc[2]);
+        // dbg!(bc[3]);
         // Return our future
         Box::new(future)
     }
@@ -724,8 +813,6 @@ impl Renderer {
                         *clip_rect,
                     )];
 
-                    dbg!(clip_rect);
-
                     let (vertices, indices) = self.create_subbuffers(&mesh);
 
                     let push_constants = vs::ty::PushConstants {
@@ -737,19 +824,23 @@ impl Renderer {
                         .bind_pipeline_graphics(pipeline.clone())
                         .set_viewport(0, vec![Viewport {
                             origin: [
+                                // 20., 
+                                // 0.
                                 clip_rect.left() + callback.rect.left(),
                                 clip_rect.top() + callback.rect.top(),
                             ],
                             dimensions: [
-                                callback.rect.width() as f32,
-                                callback.rect.height() as f32,
+                                scale_factor * callback.rect.width() as f32,
+                                scale_factor * callback.rect.height() as f32,
                             ],
                             depth_range: 0.0..1.0,
                         }])
-                        .set_scissor(0, vec![Scissor {
-                            origin: [clip_rect.left() as u32, clip_rect.top() as u32],
-                            dimensions: [clip_rect.width() as u32, clip_rect.height() as u32],
-                        }])
+                        // .set_scissor(0, vec![Scissor {
+                        //     origin: [0, 0],
+                        //     dimensions: [callback.rect.width() as u32, callback.rect.height() as u32],
+                        //     // origin: [clip_rect.left() as u32, clip_rect.top() as u32],
+                        //     dimensions: [callback.rect.width() as u32, callback.rect.height() as u32],
+                        // }])
                         // .push_constants(pipeline.layout().clone(), 0, push_constants)
                         .bind_vertex_buffers(0, vertices.clone())
                         .bind_index_buffer(indices.clone())
@@ -844,6 +935,7 @@ layout(location = 0) in vec4 v_color;
 layout(location = 1) in vec2 v_tex_coords;
 
 layout(location = 0) out vec4 f_color;
+layout(location = 1) out vec4 f_color2;
 
 layout(binding = 0, set = 0) uniform sampler2D font_texture;
 
@@ -885,6 +977,8 @@ void main() {
         f_color = srgba_from_linear(v_color * texture_color) / 255.0;
         f_color.a = pow(f_color.a, 1.6);
     }
+
+    f_color2 = vec4(0, 1, 1, 0);
 }"
     }
 }

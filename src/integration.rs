@@ -191,7 +191,7 @@ impl Gui {
             &clipped_meshes,
             &textures_delta,
             self.egui_winit.pixels_per_point(),
-            image_dimensions,
+            image_dimensions
         )
     }
 
