@@ -548,10 +548,10 @@ impl Renderer {
             self.gfx_queue.device().clone(),
             final_image.image().dimensions(),
             Format::B8G8R8A8_SRGB,
-            ImageUsage { 
+            ImageUsage {
                 transfer_src: true,
                 // transfer_dst: true,
-                .. ImageUsage::color_attachment()
+                ..ImageUsage::color_attachment()
             },
             ImageCreateFlags::none(),
             Some(self.gfx_queue.family()),
@@ -789,17 +789,20 @@ impl Renderer {
                                 color: Color32::WHITE,
                             },
                             Vertex {
-                                pos: Pos2 { x: callback.rect.width(), y: 0. },
+                                pos: Pos2 { x: 1.0, y: 0. },
+                                // pos: Pos2 { x: 100., y: 0. },
                                 uv: Pos2 { x: 1., y: 0. },
                                 color: Color32::WHITE,
                             },
                             Vertex {
-                                pos: Pos2 { x: 0., y: callback.rect.height() },
+                                pos: Pos2 { x: 0., y: 1.0 },
+                                // pos: Pos2 { x: 0., y: 100.0 },
                                 uv: Pos2 { x: 0., y: 1. },
                                 color: Color32::WHITE,
                             },
                             Vertex {
-                                pos: Pos2 { x: callback.rect.width(), y: callback.rect.height() },
+                                // pos: Pos2 { x: callback.rect.width(), y: callback.rect.height() },
+                                pos: Pos2 { x: 1.0, y: 1.0 },
                                 uv: Pos2 { x: 1., y: 1. },
                                 color: Color32::WHITE,
                             },
@@ -814,34 +817,50 @@ impl Renderer {
                     )];
 
                     let (vertices, indices) = self.create_subbuffers(&mesh);
-
+                    
                     let push_constants = vs::ty::PushConstants {
-                        screen_size: [100.0, 100.0],
+                        screen_size: [
+                            scale_factor * clip_rect.width(),
+                            scale_factor * clip_rect.height(),
+                        ],
                         need_srgb_conv: self.need_srgb_conv.into(),
                     };
 
                     builder
                         .bind_pipeline_graphics(pipeline.clone())
+                        // .set_viewport(0, vec![Viewport {
+                        //     origin: [
+                        //         0.0, 120.0
+                        //     ],
+                        //     dimensions: [
+                        //         100.0, 50.
+                        //     ],
+                        //     depth_range: 0.0..1.0,
+                        // }])
                         .set_viewport(0, vec![Viewport {
                             origin: [
-                                // 20., 
+                                // 0.,
                                 // 0.
-                                clip_rect.left() + callback.rect.left(),
-                                clip_rect.top() + callback.rect.top(),
+                                scale_factor * clip_rect.left(),
+                                scale_factor * clip_rect.top(),
                             ],
                             dimensions: [
-                                scale_factor * callback.rect.width() as f32,
-                                scale_factor * callback.rect.height() as f32,
+                                scale_factor * clip_rect.width() as f32,
+                                scale_factor * clip_rect.height() as f32,
                             ],
                             depth_range: 0.0..1.0,
                         }])
-                        // .set_scissor(0, vec![Scissor {
-                        //     origin: [0, 0],
-                        //     dimensions: [callback.rect.width() as u32, callback.rect.height() as u32],
-                        //     // origin: [clip_rect.left() as u32, clip_rect.top() as u32],
-                        //     dimensions: [callback.rect.width() as u32, callback.rect.height() as u32],
+                        .set_scissor(0, vec![Scissor::irrelevant()])
+                            // origin: [0, 0],
+                            //
+                            // dimensions: [
+                            //     500, 500
+                            // ],
+                            // dimensions: [callback.rect.width() as u32, callback.rect.height() as u32],
+                            // origin: [clip_rect.left() as u32, clip_rect.top() as u32],
+                            // dimensions: [callback.rect.width() as u32, callback.rect.height() as u32],
                         // }])
-                        // .push_constants(pipeline.layout().clone(), 0, push_constants)
+                        .push_constants(pipeline.layout().clone(), 0, push_constants)
                         .bind_vertex_buffers(0, vertices.clone())
                         .bind_index_buffer(indices.clone())
                         .draw_indexed(indices.len() as u32, 1, 0, 0, 0)
