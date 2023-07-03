@@ -39,7 +39,7 @@ use vulkano::{
     memory::pool::StandardMemoryPool,
     pipeline::{
         graphics::{
-            color_blend::{AttachmentBlend, BlendFactor, ColorBlendState},
+            color_blend::{AttachmentBlend, BlendFactor, BlendOp, ColorBlendState},
             input_assembly::InputAssemblyState,
             rasterization::{CullMode as CullModeEnum, RasterizationState},
             vertex_input::BuffersDefinition,
@@ -298,6 +298,12 @@ impl Renderer {
 
         let mut blend = AttachmentBlend::alpha();
         blend.color_source = BlendFactor::One;
+        blend.color_source = BlendFactor::SrcAlpha;
+        blend.color_destination = BlendFactor::OneMinusSrcAlpha;
+        blend.color_op = BlendOp::Add;
+        blend.alpha_source = BlendFactor::One;
+        blend.alpha_destination = BlendFactor::OneMinusDstAlpha;
+        blend.alpha_op = BlendOp::Add;
         let blend_state = ColorBlendState::new(1).blend(blend);
 
         GraphicsPipeline::start()
@@ -654,7 +660,7 @@ impl Renderer {
         //     (0..(1024 * 3600 * 4)).map(|_| 0u8),
         // )
         // .unwrap();
-        
+
         // command_buffer_builder.copy_image_to_buffer(CopyImageToBufferInfo::image_buffer(
         //     self.view.clone().unwrap().image().clone(),
         //     buf.clone()
@@ -817,7 +823,7 @@ impl Renderer {
                     )];
 
                     let (vertices, indices) = self.create_subbuffers(&mesh);
-                    
+
                     let push_constants = vs::ty::PushConstants {
                         screen_size: [
                             scale_factor * clip_rect.width(),
@@ -851,14 +857,14 @@ impl Renderer {
                             depth_range: 0.0..1.0,
                         }])
                         .set_scissor(0, vec![Scissor::irrelevant()])
-                            // origin: [0, 0],
-                            //
-                            // dimensions: [
-                            //     500, 500
-                            // ],
-                            // dimensions: [callback.rect.width() as u32, callback.rect.height() as u32],
-                            // origin: [clip_rect.left() as u32, clip_rect.top() as u32],
-                            // dimensions: [callback.rect.width() as u32, callback.rect.height() as u32],
+                        // origin: [0, 0],
+                        //
+                        // dimensions: [
+                        //     500, 500
+                        // ],
+                        // dimensions: [callback.rect.width() as u32, callback.rect.height() as u32],
+                        // origin: [clip_rect.left() as u32, clip_rect.top() as u32],
+                        // dimensions: [callback.rect.width() as u32, callback.rect.height() as u32],
                         // }])
                         .push_constants(pipeline.layout().clone(), 0, push_constants)
                         .bind_vertex_buffers(0, vertices.clone())
