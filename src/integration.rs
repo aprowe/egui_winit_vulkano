@@ -153,7 +153,7 @@ impl Gui {
 
     /// Returns a set of resources used to construct the render pipeline. These can be reused
     /// to create additional pipelines and buffers to be rendered in a `PaintCallback`.
-    pub fn render_resources(&self) -> RenderResources {
+    pub fn render_resources(&self) -> RenderResources<'_> {
         self.renderer.render_resources()
     }
 
@@ -315,6 +315,30 @@ impl Gui {
     pub fn context(&self) -> egui::Context {
         self.egui_ctx.clone()
     }
+
+    /// Returns a full-screen root [`egui::Ui`] for the current frame.
+    ///
+    /// Since egui 0.32, `Ui` is the primary entry point and showing panels
+    /// directly on the [`egui::Context`] (e.g. `CentralPanel::show(ctx, ..)`) is
+    /// deprecated in favor of `show_inside(ui, ..)`. Call this inside an
+    /// `immediate_ui`/`begin_frame` layout closure to obtain a `Ui` that covers
+    /// the whole window, then add your panels with `Panel::show_inside` /
+    /// `CentralPanel::show_inside`.
+    pub fn root_ui(&self) -> egui::Ui {
+        root_ui(&self.egui_ctx)
+    }
+}
+
+/// Builds a full-screen root [`egui::Ui`] backed by the background layer of the
+/// given context, matching what `egui::Context::run_ui` constructs internally.
+pub fn root_ui(ctx: &egui::Context) -> egui::Ui {
+    egui::Ui::new(
+        ctx.clone(),
+        egui::Id::new("egui_winit_vulkano_root"),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.content_rect()),
+    )
 }
 
 // Helper to retrieve Window from surface object

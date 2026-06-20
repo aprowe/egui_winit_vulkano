@@ -91,8 +91,8 @@ impl ApplicationHandler for App {
                 // Set immediate UI in redraw here
                 // Set immediate UI in redraw here
                 gui.immediate_ui(|gui| {
-                    let ctx = gui.context();
-                    egui::CentralPanel::default().show(&ctx, |ui| {
+                    let mut root = gui.root_ui();
+                    egui::CentralPanel::default().show_inside(&mut root, |ui| {
                         ui.vertical_centered(|ui| {
                             ui.add(egui::widgets::Label::new("Hi there!"));
                             sized_text(ui, "Rich Text", 32.0);

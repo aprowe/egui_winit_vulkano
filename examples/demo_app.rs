@@ -142,7 +142,8 @@ impl ApplicationHandler for App {
                 // Set immediate UI in redraw here
                 gui.immediate_ui(|gui| {
                     let ctx = gui.context();
-                    demo_app.ui(&ctx);
+                    let mut root = gui.root_ui();
+                    egui::CentralPanel::default().show_inside(&mut root, |ui| demo_app.ui(ui));
 
                     egui::Window::new("Colors").vscroll(true).show(&ctx, |ui| {
                         egui_test.ui(ui);
@@ -151,7 +152,7 @@ impl ApplicationHandler for App {
                 // Alternatively you could
                 // gui.begin_frame();
                 // let ctx = gui.context();
-                // demo_app.ui(&ctx);
+                // egui::CentralPanel::default().show(&ctx, |ui| demo_app.ui(ui));
 
                 // Render UI
                 // Acquire swapchain future

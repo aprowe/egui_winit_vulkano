@@ -20,8 +20,8 @@ x11 = ["winit/x11", "egui-winit/x11"]
 
 [dependencies]
 ahash = "0.8"
-egui-winit = { version = "0.31", default-features = false }
-egui = "0.31"
+egui-winit = { version = "0.34", default-features = false }
+egui = "0.34"
 image = { version = "0.25", optional = true }
 winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 vulkano = { version = "0.35" }
@@ -29,5 +29,5 @@ vulkano-shaders = "0.35"
 
 [dev-dependencies]
 cgmath = "0.18.0"
-egui_demo_lib = "0.31.0"
+egui_demo_lib = "0.34.0"
 vulkano-util = { version = "0.35" }

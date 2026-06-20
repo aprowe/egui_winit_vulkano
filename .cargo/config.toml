@@ -1,0 +1,11 @@
+# egui's UI layout & tessellation use a lot of stack in debug builds. Windows'
+# default main-thread stack is only 1 MiB (Linux/macOS default to 8 MiB), so the
+# examples overflow it when run in debug mode (`cargo run --example ...`). The
+# winit event loop runs on the main thread, so the main-thread stack is what
+# matters. Reserve a larger stack at link time to make the examples work on
+# Windows. These settings only apply when building for Windows targets.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:33554432"]
+
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-arg=-Wl,--stack,33554432"]

@@ -108,8 +108,8 @@ impl ApplicationHandler for App {
                 let scene = self.scene.clone().unwrap();
                 // Set immediate UI in redraw here
                 gui.immediate_ui(|gui| {
-                    let ctx = gui.context();
-                    egui::CentralPanel::default().show(&ctx, |ui| {
+                    let mut root = gui.root_ui();
+                    egui::CentralPanel::default().show_inside(&mut root, |ui| {
                         // Create a frame to render our triangle image in
                         egui::Frame::canvas(ui.style()).fill(Rgba::BLACK.into()).show(ui, |ui| {
                             // Allocate all the space in the frame for the image

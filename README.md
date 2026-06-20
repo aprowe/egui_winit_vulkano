@@ -65,6 +65,19 @@ Remember, on Linux, you need to install following to run Egui
 sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
 ```
 
+On Windows, egui's layout and tessellation can use a lot of stack in **debug**
+builds, which may overflow Windows' default 1 MiB main-thread stack (Linux and
+macOS default to 8 MiB). The winit event loop runs on the main thread, so it is
+the main-thread stack that needs to be large enough. This repository's examples
+set a larger linked stack via [`.cargo/config.toml`](.cargo/config.toml); in your
+own app, do the same, e.g.:
+```toml
+# .cargo/config.toml
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:33554432"] # 32 MiB
+```
+Release builds are typically fine without this.
+
 # Examples
 
 ```sh

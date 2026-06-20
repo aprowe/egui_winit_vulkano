@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use egui::{load::SizedTexture, Context, ImageSource, Visuals};
-use egui_winit_vulkano::{Gui, GuiConfig};
+use egui_winit_vulkano::{root_ui, Gui, GuiConfig};
 use vulkano::{
     command_buffer::allocator::{
         StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
@@ -84,7 +84,8 @@ impl GuiState {
             ..
         } = self;
         egui_context.set_visuals(Visuals::dark());
-        egui::SidePanel::left("Side Panel").default_width(150.0).show(&egui_context, |ui| {
+        let mut root = root_ui(&egui_context);
+        egui::Panel::left("Side Panel").default_size(150.0).show_inside(&mut root, |ui| {
             ui.heading("Hello Tree");
             ui.separator();
             ui.checkbox(show_texture_window1, "Show Tree");
